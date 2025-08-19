@@ -41,7 +41,7 @@ export class LoadBalancer extends DurableObject {
 	env: Env;
 	/**
 	 * The constructor is invoked once upon creation of the Durable Object, i.e. the first call to
-	 * 	`DurableObjectStub::get` for a given identifier (no-op constructors can be omitted)
+	 * `DurableObjectStub::get` for a given identifier (no-op constructors can be omitted)
 	 *
 	 * @param ctx - The interface for interacting with Durable Object state
 	 * @param env - The interface to reference bindings declared in wrangler.jsonc
@@ -54,86 +54,94 @@ export class LoadBalancer extends DurableObject {
 	}
 
 	async fetch(request: Request): Promise<Response> {
-		const url = new URL(request.url);
-		const pathname = url.pathname;
+		try {
+			const url = new URL(request.url);
+			const pathname = url.pathname;
 
-		// 静态资源直接放行
-		if (pathname === '/favicon.ico' || pathname === '/robots.txt') {
-			return new Response('', { status: 204 });
-		}
-
-		// 管理 API 权限校验（使用 HOME_ACCESS_KEY）
-		if (
-			(pathname === '/api/keys' && ['POST', 'GET', 'DELETE'].includes(request.method)) ||
-			(pathname === '/api/keys/check' && request.method === 'GET')
-		) {
-			if (!isAdminAuthenticated(request, this.env.HOME_ACCESS_KEY)) {
-				return new Response(JSON.stringify({ error: 'Unauthorized' }) , {
-					status: 401,
-					headers: fixCors({ headers: { 'Content-Type': 'application/json' } }).headers,
-				});
+			// 静态资源直接放行
+			if (pathname === '/favicon.ico' || pathname === '/robots.txt') {
+				return new Response('', { status: 204 });
 			}
-			if (pathname === '/api/keys' && request.method === 'POST') {
-				return this.handleApiKeys(request);
-			}
-			if (pathname === '/api/keys' && request.method === 'GET') {
-				return this.getAllApiKeys();
-			}
-			if (pathname === '/api/keys' && request.method === 'DELETE') {
-				return this.handleDeleteApiKeys(request);
-			}
-			if (pathname === '/api/keys/check' && request.method === 'GET') {
-				return this.handleApiKeysCheck();
-			}
-		}
 
-		const search = url.search;
-
-		// OpenAI compatible routes
-		if (
-			pathname.endsWith('/chat/completions') ||
-			pathname.endsWith('/completions') ||
-			pathname.endsWith('/embeddings') ||
-			pathname.endsWith('/models')
-		) {
-			return this.handleOpenAI(request);
-		}
-
-		// Direct Gemini proxy
-		const authKey = this.env.AUTH_KEY;
-
-		let targetUrl = `${BASE_URL}${pathname}${search}`;
-		if (authKey) {
-		// Remove api key from query parameters if present
-		// 如果URL查询参数中包含key，则验证并移除它
-		if (search.includes('key=')) {
-			const urlObj = new URL(targetUrl);
-			const requestKey = urlObj.searchParams.get('key');
-			if (requestKey) {
-				// Check AUTH_KEY if set, before using the key from URL parameter
-				// 验证请求中的API密钥是否与环境变量中的AUTH_KEY匹配
-				if (requestKey !== authKey) {
-					return new Response('Unauthorized', { status: 401, headers: fixCors({}).headers });
+			// 管理 API 权限校验（使用 HOME_ACCESS_KEY）
+			if (
+				(pathname === '/api/keys' && ['POST', 'GET', 'DELETE'].includes(request.method)) ||
+				(pathname === '/api/keys/check' && request.method === 'GET')
+			) {
+				if (!isAdminAuthenticated(request, this.env.HOME_ACCESS_KEY)) {
+					return new Response(JSON.stringify({ error: 'Unauthorized' }) , {
+						status: 401,
+						headers: fixCors({ headers: { 'Content-Type': 'application/json' } }).headers,
+					});
 				}
-				// Remove key from URL to avoid duplication
-				// 移除URL中的key参数，避免重复
-				urlObj.searchParams.delete('key');
-				targetUrl = urlObj.toString();
-				// instead of directly returning the forwarded request
-				// 使用负载均衡方式转发请求
-				return this.forwardRequestWithLoadBalancing(targetUrl, request);
+				if (pathname === '/api/keys' && request.method === 'POST') {
+					return this.handleApiKeys(request);
+				}
+				if (pathname === '/api/keys' && request.method === 'GET') {
+					return this.getAllApiKeys();
+				}
+				if (pathname === '/api/keys' && request.method === 'DELETE') {
+					return this.handleDeleteApiKeys(request);
+				}
+				if (pathname === '/api/keys/check' && request.method === 'GET') {
+					return this.handleApiKeysCheck();
+				}
 			}
-		// Check x-goog-api-key in headers if no key in URL
-		// 如果URL中没有key参数，则检查请求头中的x-goog-api-key
-		} else {
-			const requestKey = request.headers.get('x-goog-api-key');
-			// 验证请求头中的API密钥是否与环境变量中的AUTH_KEY匹配
-			if (requestKey !== authKey) {
-				return new Response('Unauthorized', { status: 401, headers: fixCors({}).headers });
+
+			// OpenAI compatible routes
+			if (
+				pathname.endsWith('/chat/completions') ||
+				pathname.endsWith('/completions') ||
+				pathname.endsWith('/embeddings') ||
+				pathname.endsWith('/models')
+			) {
+				return this.handleOpenAI(request);
 			}
-			// 使用负载均衡方式转发请求，保持原始请求头
-			return this.forwardRequestWithLoadBalancing(targetUrl, request);
+
+			// Direct Gemini proxy (original logic from the file)
+			const authKey = this.env.AUTH_KEY;
+			const search = url.search;
+			let targetUrl = `${BASE_URL}${pathname}${search}`;
+
+			if (authKey) {
+				if (search.includes('key=')) {
+					const urlObj = new URL(targetUrl);
+					const requestKey = urlObj.searchParams.get('key');
+					if (requestKey) {
+						if (requestKey !== authKey) {
+							return new Response('Unauthorized', { status: 401, headers: fixCors({}).headers });
+						}
+						urlObj.searchParams.delete('key');
+						targetUrl = urlObj.toString();
+						return this.forwardRequestWithLoadBalancing(targetUrl, request);
+					}
+				} else {
+					const requestKey = request.headers.get('x-goog-api-key');
+					if (requestKey !== authKey) {
+						return new Response('Unauthorized', { status: 401, headers: fixCors({}).headers });
+					}
+					return this.forwardRequestWithLoadBalancing(targetUrl, request);
+				}
 			}
+			// If no auth key is set in env, and no key in request, what should happen?
+			// For now, let's assume it should fail or there's some other logic.
+			// Based on the code, it seems it would just fall through. Let's add a 404 for clarity.
+			return new Response("Route not found.", { status: 404 });
+
+		} catch (e: any) {
+			// --- Durable Object 内部的终极错误安全网 ---
+			console.error("Caught Unhandled Exception in Durable Object fetch:", e);
+			const errorResponse = {
+				error: {
+					message: e.message || "An unexpected internal error occurred in the durable object.",
+					type: "durable_object_internal_error",
+					stack: e.stack, // 堆栈信息对调试至关重要
+				},
+			};
+			return new Response(JSON.stringify(errorResponse), {
+				status: 500,
+				headers: { 'Content-Type': 'application/json', ...fixCors({}).headers },
+			});
 		}
 	}
 
@@ -793,11 +801,11 @@ export class LoadBalancer extends DurableObject {
 
 	private async getRandomApiKey(): Promise<string | null> {
 		try {
-			const results = await this.ctx.storage.sql.exec('SELECT * FROM api_keys ORDER BY RANDOM() LIMIT 1').raw<any>();
+			const results = await this.ctx.storage.sql.exec('SELECT api_key FROM api_keys ORDER BY RANDOM() LIMIT 1').raw<string[]>();
 			const keys = Array.from(results);
-			if (keys) {
-				const key = keys[0] as any;
-				console.log(`Gemini Selected API Key: ${key}`);
+			if (keys && keys.length > 0) {
+				const key = keys[0][0]; // .raw() returns an array of arrays
+				console.log(`[LOG] DO: Selected API Key (truncated): ...${key.slice(-4)}`);
 				return key;
 			}
 			return null;
@@ -808,44 +816,65 @@ export class LoadBalancer extends DurableObject {
 	}
 
 	private async handleOpenAI(request: Request): Promise<Response> {
+		const url = new URL(request.url);
+		const pathname = url.pathname;
+		console.log(`--- [LOG] DO: OpenAI-Compatible Request Received --- Path: ${pathname}, Method: ${request.method}`);
+
+		// 1. 认证检查
 		const authKey = this.env.AUTH_KEY;
 		if (authKey) {
 			const authHeader = request.headers.get('Authorization');
 			const token = authHeader?.replace('Bearer ', '');
 			if (token !== authKey) {
+				console.warn(`[LOG] DO: Unauthorized access attempt for path ${pathname}.`);
 				return new Response('Unauthorized', { status: 401, headers: fixCors({}).headers });
 			}
 		}
-		const url = new URL(request.url);
-		const pathname = url.pathname;
 
-		const assert = (success: Boolean) => {
-			if (!success) {
-				throw new HttpError('The specified HTTP method is not allowed for the requested resource', 400);
+		// 2. 错误处理器定义
+		const errHandler = (err: Error, context: string = 'handler') => {
+			console.error(`[LOG] DO: Error during ${context} for path ${pathname}:`, err);
+			const status = (err as HttpError).status || 500;
+			const errorResponse = { error: { message: err.message ?? 'Internal Server Error', type: `${context}_error` } };
+			return new Response(JSON.stringify(errorResponse), {
+				status: status,
+				headers: { 'Content-Type': 'application/json', ...fixCors({}).headers },
+			});
+		};
+		
+		// 3. 核心业务逻辑
+		try {
+			console.log("[LOG] DO: Attempting to get a random API key...");
+			const apiKey = await this.getRandomApiKey();
+			if (!apiKey) {
+				// 这个错误很关键，需要明确记录
+				console.error("[LOG] DO: CRITICAL - No API keys available in the database.");
+				throw new HttpError('No API keys configured in the load balancer.', 503); // 503 Service Unavailable 更准确
 			}
-		};
-		const errHandler = (err: Error) => {
-			console.error(err);
-			return new Response(err.message, fixCors({ statusText: err.message ?? 'Internal Server Error', status: 500 }));
-		};
+			
+			console.log(`[LOG] DO: Routing to specific handler for path: ${pathname}`);
+			switch (true) {
+				case pathname.endsWith('/chat/completions'):
+					if (request.method !== 'POST') throw new HttpError('Method Not Allowed', 405);
+					return this.handleCompletions(await request.json(), apiKey).catch(err => errHandler(err, 'handleCompletions'));
 
-		const apiKey = await this.getRandomApiKey();
-		if (!apiKey) {
-			return new Response('No API keys configured in the load balancer.', { status: 500 });
-		}
+				case pathname.endsWith('/embeddings'):
+					if (request.method !== 'POST') throw new HttpError('Method Not Allowed', 405);
+					return this.handleEmbeddings(await request.json(), apiKey).catch(err => errHandler(err, 'handleEmbeddings'));
 
-		switch (true) {
-			case pathname.endsWith('/chat/completions'):
-				assert(request.method === 'POST');
-				return this.handleCompletions(await request.json(), apiKey).catch(errHandler);
-			case pathname.endsWith('/embeddings'):
-				assert(request.method === 'POST');
-				return this.handleEmbeddings(await request.json(), apiKey).catch(errHandler);
-			case pathname.endsWith('/models'):
-				assert(request.method === 'GET');
-				return this.handleModels(apiKey).catch(errHandler);
-			default:
-				throw new HttpError('404 Not Found', 404);
+				case pathname.endsWith('/models'):
+					if (request.method !== 'GET') throw new HttpError('Method Not Allowed', 405);
+					return this.handleModels(apiKey).catch(err => errHandler(err, 'handleModels'));
+
+				default:
+					throw new HttpError('API path not found', 404);
+			}
+		} catch (e: any) {
+			// 这个catch块现在主要捕获
+			// 1. apiKey获取失败的错误
+			// 2. request.json()解析失败的错误
+			// 3. 路由和方法检查抛出的HttpError
+			return errHandler(e, 'pre_handler_check');
 		}
 	}
 }
