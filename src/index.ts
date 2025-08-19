@@ -37,13 +37,31 @@ app.get('/favicon.ico', async (c) => {
 
 // 其它请求转发到 Durable Object
 app.all('*', async (c) => {
-    const id: DurableObjectId = c.env.LOAD_BALANCER.idFromName('loadbalancer');
-    const stub = c.env.LOAD_BALANCER.get(id, { locationHint: 'wnam' });
-    const resp = await stub.fetch(c.req.raw);
-    return new Response(resp.body, {
-        status: resp.status,
-        headers: resp.headers,
-    });
+    try {
+        const id: DurableObjectId = c.env.LOAD_BALANCER.idFromName('loadbalancer');
+        const stub = c.env.LOAD_BALANCER.get(id, { locationHint: 'wnam' });
+        
+        // 直接将对Durable Object的调用包裹在try...catch中
+        // stub.fetch返回的是一个完整的Response对象，我们应该直接返回它
+        // 这样可以确保流式响应等特性被正确处理
+        const resp = await stub.fetch(c.req.raw);
+        return resp;
+
+    } catch (e: any) {
+        // 这个catch块捕获的是与Durable Object通信时发生的罕见错误
+        console.error("Fatal Error: Failed to fetch from Durable Object stub.", e);
+        
+        // 向客户端返回一个结构化的JSON错误
+        const errorResponse = {
+            error: {
+                message: "Failed to communicate with the core processing service. This is a critical error.",
+                type: "durable_object_communication_error",
+                details: e.message,
+            },
+        };
+        // 使用Hono的.json()方法可以更方便地返回JSON响应
+        return c.json(errorResponse, 500);
+    }
 });
 
 type Env = {
