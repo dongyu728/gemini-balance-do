@@ -1,4 +1,4 @@
-// gemini-balance-do/src/handler.ts (The Definitive, Final, Fully-Functional Version with Rollback)
+// gemini-balance-do/src/handler.ts (The Definitive, Final, Fully-Functional Version with Root Cause Fix)
 
 import { DurableObject } from 'cloudflare:workers';
 import { isAdminAuthenticated } from './auth';
@@ -24,7 +24,7 @@ const BASE_URL = 'https://generativelanguage.googleapis.com';
 const API_VERSION = 'v1beta';
 
 const makeHeaders = (apiKey: string, more?: Record<string, string>) => ({
-	'x-goog-api-client': 'genai-js/0.10.0', // 使用一个常见的SDK版本号
+	'x-goog-api-client': 'genai-js/0.10.0',
 	...(apiKey && { 'x-goog-api-key': apiKey }),
 	...more,
 });
@@ -38,7 +38,6 @@ export class LoadBalancer extends DurableObject {
 	}
 
 	async fetch(request: Request): Promise<Response> {
-		// --- 全局错误安全网 ---
 		try {
 			const url = new URL(request.url);
 			const pathname = url.pathname;
@@ -47,7 +46,6 @@ export class LoadBalancer extends DurableObject {
 				return new Response('', { status: 204 });
 			}
 			
-			// 管理API路由
 			if (pathname.startsWith('/api/keys')) {
 				if (!isAdminAuthenticated(request, this.env.HOME_ACCESS_KEY)) {
 					return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -61,7 +59,6 @@ export class LoadBalancer extends DurableObject {
 				if (pathname === '/api/keys/check' && request.method === 'GET') return this.handleApiKeysCheck();
 			}
 
-			// OpenAI兼容API路由
 			if (
 				pathname.endsWith('/chat/completions') ||
 				pathname.endsWith('/completions') ||
@@ -92,11 +89,8 @@ export class LoadBalancer extends DurableObject {
 	async handleCompletions(req: any, apiKey: string) {
 		const model = req.model?.startsWith('models/') ? req.model.substring(7) : (req.model || 'gemini-1.5-flash-latest');
 		
-		// --- 【核心修改点】 ---
-		// 无论客户端请求什么，我们都强制使用非流式传输，以确保最大稳定性。
 		const stream = false;
 		console.log("[LOG] Streaming is forcefully disabled for stability.");
-		// --- 【核心修改点结束】 ---
 
 		const body = await this.transformRequest(req);
 		const task = stream ? 'streamGenerateContent' : 'generateContent';
@@ -115,7 +109,6 @@ export class LoadBalancer extends DurableObject {
 		let responseBody: BodyInit | null = response.body;
 		if (response.ok) {
 			const id = 'chatcmpl-' + this.generateId();
-			// 由于 stream 永远为 false, 代码将总是执行这个 "else" 块
 			console.log("[LOG] Processing non-stream (full) response from Gemini.");
 			const data = await response.json();
 			responseBody = this.processCompletionsResponse(data, model, id);
@@ -180,7 +173,6 @@ export class LoadBalancer extends DurableObject {
 	}
 
     // --- 以下是其他辅助函数和管理API函数 ---
-    // --- 已全部恢复到您原始的、功能正常的版本，并增加了日志 ---
     
 	async handleModels(apiKey: string) {
 		const response = await fetch(`${BASE_URL}/${API_VERSION}/models`, {
@@ -322,13 +314,12 @@ export class LoadBalancer extends DurableObject {
 	async handleApiKeysCheck(): Promise<Response> {
 		try {
 			console.log("[LOG] Admin: Starting API keys check.");
-			const results = await this.ctx.storage.sql.exec('SELECT api_key FROM api_keys').raw<any[]>();
-			const keys = Array.from(results);
+			const results = await this.ctx.storage.sql.exec('SELECT api_key FROM api_keys').raw<[string]>();
+			const keys = results ? results.map(row => row[0]) : [];
 			
 			console.log(`[LOG] Admin: Found ${keys.length} keys to check.`);
 			const checkResults = await Promise.all(
-				keys.map(async (keyArr) => {
-                    const key = keyArr[0] as string;
+				keys.map(async (key: string) => {
 					try {
 						const response = await fetch(`${BASE_URL}/${API_VERSION}/models?key=${key}`);
 						return { key, valid: response.ok, error: response.ok ? null : await response.text() };
@@ -356,9 +347,10 @@ export class LoadBalancer extends DurableObject {
 	async getAllApiKeys(): Promise<Response> {
 		try {
 			console.log("[LOG] Admin: Fetching all API keys.");
-			// 使用原始的、功能正常的 .raw() 方法
-			const results = await this.ctx.storage.sql.exec('SELECT * FROM api_keys').raw<any[]>();
-			const keys = Array.from(results).map(row => row[0] as string);
+			// 【根源修复】使用 .raw() 方法并正确处理返回的“数组的数组”
+			const results = await this.ctx.storage.sql.exec('SELECT api_key FROM api_keys').raw<[string]>();
+			// 将 [["key1"], ["key2"]] 转换为 ["key1", "key2"]
+			const keys = results ? results.map(row => row[0]) : [];
 			console.log(`[LOG] Admin: Found ${keys.length} keys.`);
 			return new Response(JSON.stringify({ keys }), { headers: { 'Content-Type': 'application/json' } });
 		} catch (error: any) {
@@ -370,16 +362,17 @@ export class LoadBalancer extends DurableObject {
 	private async getRandomApiKey(): Promise<string | null> {
 		try {
 			console.log("[LOG] Executing SQL to get a random key...");
-			// 使用原始的、功能正常的 .raw() 方法
-			const results = await this.ctx.storage.sql.exec('SELECT * FROM api_keys ORDER BY RANDOM() LIMIT 1').raw<any[]>();
+			// 【根源修复】使用 .raw() 方法并正确处理返回的“数组的数组”
+			const results = await this.ctx.storage.sql.exec('SELECT api_key FROM api_keys ORDER BY RANDOM() LIMIT 1').raw<[string]>();
 			console.log("[LOG] SQL query completed.");
 
+			// 正确地从结果中提取单个key
 			if (results && results.length > 0 && results[0] && typeof results[0][0] === 'string') {
 				const key = results[0][0];
 				console.log(`[LOG] Successfully retrieved API Key (truncated): ...${key.slice(-4)}`);
 				return key;
 			} else {
-				console.warn("[LOG] SQL query did not return a valid key. Full result:", JSON.stringify(results));
+				console.warn("[LOG] SQL query did not return a valid key. Is the database empty? Full result:", JSON.stringify(results));
 				return null;
 			}
 		} catch (error: any) {
