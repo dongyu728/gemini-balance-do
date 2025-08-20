@@ -75,7 +75,7 @@ Youtube: https://youtu.be/_5a6HfL2wn4
 *   **一键检查**： 点击“一键检查”按钮，可以检查 API key 可用性。
 *   **批量删除**： 选中无效的 API key，可以一键删除所有无效的 API key。
 
-**管理面板访问密钥为 `7b18e536c27ab304266db3220b8e000db8fbbe35d6e1fde729a1a1d47303858d`，用于访问管理面板和管理 API 时的身份验证，强烈建议你在Cloudflare Worker环境变量中修改 `HOME_ACCESS_KEY` 的值，修改完成后重新部署即可。**
+**管理面板访问密钥为 `xgd006697`，用于访问管理面板和管理 API 时的身份验证，强烈建议你在Cloudflare Worker环境变量中修改 `HOME_ACCESS_KEY` 的值，修改完成后重新部署即可。**
 
 ## 💻 API 用法
 
@@ -85,7 +85,7 @@ BaseURL: <你的worker地址>
 
 API 密钥: `<你的AUTH_KEY>`
 
-**默认 API 密钥为 `ajielu`，强烈建议你在Cloudflare Worker环境变量中修改 `AUTH_KEY` 的值，并重新部署 Worker。**
+**默认 API 密钥为 `dongyu0728`，强烈建议你在Cloudflare Worker环境变量中修改 `AUTH_KEY` 的值，并重新部署 Worker。**
 
 
 ### 管理 API
