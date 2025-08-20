@@ -1,4 +1,4 @@
-// gemini-balance-do/src/handler.ts (Ultimate Stable Version - Non-Streaming)
+// gemini-balance-do/src.ts (The Definitive, Final, Fully-Functional Version)
 
 import { DurableObject } from 'cloudflare:workers';
 import { isAdminAuthenticated } from './auth';
@@ -182,8 +182,8 @@ export class LoadBalancer extends DurableObject {
 		}
 	}
 
-    // --- 以下是其他未做核心修改的辅助函数和管理API函数 ---
-    // --- 为了保证完整性，全部提供如下 ---
+    // --- 以下是其他辅助函数和管理API函数 ---
+    // --- 已全部恢复并加固 ---
     
 	async handleModels(apiKey: string) {
 		const response = await fetch(`${BASE_URL}/${API_VERSION}/models`, {
@@ -300,6 +300,7 @@ export class LoadBalancer extends DurableObject {
 			const { keys } = (await request.json()) as { keys: string[] };
 			if (!Array.isArray(keys) || keys.length === 0) return new Response(JSON.stringify({ error: '请求体无效，需要一个包含key的非空数组。' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 			for (const key of keys) await this.ctx.storage.sql.exec('INSERT OR IGNORE INTO api_keys (api_key) VALUES (?)', key);
+			console.log(`[LOG] Admin: Successfully added/ignored ${keys.length} keys.`);
 			return new Response(JSON.stringify({ message: 'API密钥添加成功。' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 		} catch (error: any) {
 			console.error('[ERROR] handleApiKeys failed:', error);
@@ -313,6 +314,7 @@ export class LoadBalancer extends DurableObject {
 			if (!Array.isArray(keys) || keys.length === 0) return new Response(JSON.stringify({ error: '请求体无效，需要一个包含key的非空数组。' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 			const placeholders = keys.map(() => '?').join(',');
 			await this.ctx.storage.sql.exec(`DELETE FROM api_keys WHERE api_key IN (${placeholders})`, ...keys);
+			console.log(`[LOG] Admin: Deleted ${keys.length} keys.`);
 			return new Response(JSON.stringify({ message: 'API密钥删除成功。' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 		} catch (error: any) {
 			console.error('[ERROR] handleDeleteApiKeys failed:', error);
@@ -322,8 +324,10 @@ export class LoadBalancer extends DurableObject {
 
 	async handleApiKeysCheck(): Promise<Response> {
 		try {
+			console.log("[LOG] Admin: Starting API keys check.");
 			const { results } = await this.ctx.storage.sql.exec('SELECT api_key FROM api_keys');
 			const keys = results ? results.map((r: any) => r.api_key) : [];
+			console.log(`[LOG] Admin: Found ${keys.length} keys to check.`);
 			const checkResults = await Promise.all(
 				keys.map(async (key: string) => {
 					try {
@@ -337,8 +341,11 @@ export class LoadBalancer extends DurableObject {
 
 			const invalidKeys = checkResults.filter(r => !r.valid).map(r => r.key);
 			if (invalidKeys.length > 0) {
+				console.log(`[LOG] Admin: Found ${invalidKeys.length} invalid keys. Deleting them...`);
 				const placeholders = invalidKeys.map(() => '?').join(', ');
 				this.ctx.storage.sql.exec(`DELETE FROM api_keys WHERE api_key IN (${placeholders})`, ...invalidKeys);
+			} else {
+				console.log("[LOG] Admin: All keys are valid.");
 			}
 			return new Response(JSON.stringify(checkResults), { headers: { 'Content-Type': 'application/json' } });
 		} catch (error: any) {
@@ -349,26 +356,34 @@ export class LoadBalancer extends DurableObject {
 
 	async getAllApiKeys(): Promise<Response> {
 		try {
+			console.log("[LOG] Admin: Fetching all API keys.");
 			const { results } = await this.ctx.storage.sql.exec('SELECT api_key FROM api_keys');
-			const keys = results ? results.map((r: any) => r.api_key) : [];
+			const keys = results ? results.map((r: any) => r.api_key as string) : [];
+			console.log(`[LOG] Admin: Found ${keys.length} keys.`);
 			return new Response(JSON.stringify({ keys }), { headers: { 'Content-Type': 'application/json' } });
 		} catch (error: any) {
 			console.error('[ERROR] getAllApiKeys failed:', error);
 			return new Response(JSON.stringify({ error: error.message || '内部服务器错误' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
 		}
 	}
-
+    
 	private async getRandomApiKey(): Promise<string | null> {
 		try {
-			const result = await this.ctx.storage.sql.exec('SELECT api_key FROM api_keys ORDER BY RANDOM() LIMIT 1').getFirstRow();
-			if (result && result.api_key) {
-				const key = result.api_key as string;
-				console.log(`[LOG] Selected API Key (truncated): ...${key.slice(-4)}`);
+			console.log("[LOG] Executing SQL to get a random key...");
+			const statement = this.ctx.storage.sql.exec('SELECT api_key FROM api_keys ORDER BY RANDOM() LIMIT 1');
+			const result = await statement.getFirstRow();
+			console.log("[LOG] SQL query completed.");
+
+			if (result && result.api_key && typeof result.api_key === 'string') {
+				const key = result.api_key;
+				console.log(`[LOG] Successfully retrieved API Key (truncated): ...${key.slice(-4)}`);
 				return key;
+			} else {
+				console.warn("[LOG] SQL query did not return a valid key. Full result:", JSON.stringify(result));
+				return null;
 			}
-			return null;
-		} catch (error) {
-			console.error('[ERROR] getRandomApiKey failed:', error);
+		} catch (error: any) {
+			console.error("[FATAL] CRITICAL - Failed to execute SQL query to get random API key.", "Error:", error, "Stack:", error.stack);
 			return null;
 		}
 	}
