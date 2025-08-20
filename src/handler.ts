@@ -1,4 +1,4 @@
-// gemini-balance-do/src.ts (The Definitive, Final, Fully-Functional Version)
+// gemini-balance-do/src/handler.ts (The Definitive, Final, Fully-Functional Version)
 
 import { DurableObject } from 'cloudflare:workers';
 import { isAdminAuthenticated } from './auth';
@@ -8,7 +8,7 @@ class HttpError extends Error {
 	status: number;
 	constructor(message: string, status: number) {
 		super(message);
-this.name = this.constructor.name;
+		this.name = this.constructor.name;
 		this.status = status;
 	}
 }
@@ -183,7 +183,7 @@ export class LoadBalancer extends DurableObject {
 	}
 
     // --- 以下是其他辅助函数和管理API函数 ---
-    // --- 已全部恢复并加固 ---
+    // --- 已全部恢复到原始、功能正常的版本，并增加了日志 ---
     
 	async handleModels(apiKey: string) {
 		const response = await fetch(`${BASE_URL}/${API_VERSION}/models`, {
@@ -303,7 +303,7 @@ export class LoadBalancer extends DurableObject {
 			console.log(`[LOG] Admin: Successfully added/ignored ${keys.length} keys.`);
 			return new Response(JSON.stringify({ message: 'API密钥添加成功。' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 		} catch (error: any) {
-			console.error('[ERROR] handleApiKeys failed:', error);
+			console.error('[ERROR] Admin: handleApiKeys failed:', error);
 			return new Response(JSON.stringify({ error: error.message || '内部服务器错误' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
 		}
 	}
@@ -317,7 +317,7 @@ export class LoadBalancer extends DurableObject {
 			console.log(`[LOG] Admin: Deleted ${keys.length} keys.`);
 			return new Response(JSON.stringify({ message: 'API密钥删除成功。' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 		} catch (error: any) {
-			console.error('[ERROR] handleDeleteApiKeys failed:', error);
+			console.error('[ERROR] Admin: handleDeleteApiKeys failed:', error);
 			return new Response(JSON.stringify({ error: error.message || '内部服务器错误' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
 		}
 	}
@@ -325,8 +325,10 @@ export class LoadBalancer extends DurableObject {
 	async handleApiKeysCheck(): Promise<Response> {
 		try {
 			console.log("[LOG] Admin: Starting API keys check.");
-			const { results } = await this.ctx.storage.sql.exec('SELECT api_key FROM api_keys');
-			const keys = results ? results.map((r: any) => r.api_key) : [];
+			// 使用原始的、功能正常的 .raw() 方法
+			const results = await this.ctx.storage.sql.exec('SELECT api_key FROM api_keys').raw<[string]>();
+			const keys = results ? results.map(row => row[0]) : [];
+			
 			console.log(`[LOG] Admin: Found ${keys.length} keys to check.`);
 			const checkResults = await Promise.all(
 				keys.map(async (key: string) => {
@@ -349,7 +351,7 @@ export class LoadBalancer extends DurableObject {
 			}
 			return new Response(JSON.stringify(checkResults), { headers: { 'Content-Type': 'application/json' } });
 		} catch (error: any) {
-			console.error('[ERROR] handleApiKeysCheck failed:', error);
+			console.error('[ERROR] Admin: handleApiKeysCheck failed:', error);
 			return new Response(JSON.stringify({ error: error.message || '内部服务器错误' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
 		}
 	}
@@ -357,12 +359,13 @@ export class LoadBalancer extends DurableObject {
 	async getAllApiKeys(): Promise<Response> {
 		try {
 			console.log("[LOG] Admin: Fetching all API keys.");
-			const { results } = await this.ctx.storage.sql.exec('SELECT api_key FROM api_keys');
-			const keys = results ? results.map((r: any) => r.api_key as string) : [];
+			// 使用原始的、功能正常的 .raw() 方法
+			const results = await this.ctx.storage.sql.exec('SELECT api_key FROM api_keys').raw<[string]>();
+			const keys = results ? results.map(row => row[0]) : [];
 			console.log(`[LOG] Admin: Found ${keys.length} keys.`);
 			return new Response(JSON.stringify({ keys }), { headers: { 'Content-Type': 'application/json' } });
 		} catch (error: any) {
-			console.error('[ERROR] getAllApiKeys failed:', error);
+			console.error('[ERROR] Admin: getAllApiKeys failed:', error);
 			return new Response(JSON.stringify({ error: error.message || '内部服务器错误' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
 		}
 	}
@@ -370,16 +373,16 @@ export class LoadBalancer extends DurableObject {
 	private async getRandomApiKey(): Promise<string | null> {
 		try {
 			console.log("[LOG] Executing SQL to get a random key...");
-			const statement = this.ctx.storage.sql.exec('SELECT api_key FROM api_keys ORDER BY RANDOM() LIMIT 1');
-			const result = await statement.getFirstRow();
+			// 使用原始的、功能正常的 .raw() 方法
+			const results = await this.ctx.storage.sql.exec('SELECT api_key FROM api_keys ORDER BY RANDOM() LIMIT 1').raw<[string]>();
 			console.log("[LOG] SQL query completed.");
 
-			if (result && result.api_key && typeof result.api_key === 'string') {
-				const key = result.api_key;
+			if (results && results.length > 0 && results[0] && typeof results[0][0] === 'string') {
+				const key = results[0][0];
 				console.log(`[LOG] Successfully retrieved API Key (truncated): ...${key.slice(-4)}`);
 				return key;
 			} else {
-				console.warn("[LOG] SQL query did not return a valid key. Full result:", JSON.stringify(result));
+				console.warn("[LOG] SQL query did not return a valid key. Full result:", JSON.stringify(results));
 				return null;
 			}
 		} catch (error: any) {
