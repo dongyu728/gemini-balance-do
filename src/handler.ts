@@ -123,9 +123,7 @@ export class LoadBalancer extends DurableObject {
 					return this.forwardRequestWithLoadBalancing(targetUrl, request);
 				}
 			}
-			// If no auth key is set in env, and no key in request, what should happen?
-			// For now, let's assume it should fail or there's some other logic.
-			// Based on the code, it seems it would just fall through. Let's add a 404 for clarity.
+			
 			return new Response("Route not found.", { status: 404 });
 
 		} catch (e: any) {
@@ -603,65 +601,80 @@ export class LoadBalancer extends DurableObject {
 	}
 
 	private toOpenAiStream(this: any, line: any, controller: any) {
-		const reasonsMap: Record<string, string> = {
-			STOP: 'stop',
-			MAX_TOKENS: 'length',
-			SAFETY: 'content_filter',
-			RECITATION: 'content_filter',
-		};
-
-		const { candidates, usageMetadata } = line;
-		if (usageMetadata) {
-			this.shared.usage = {
-				completion_tokens: usageMetadata.candidatesTokenCount,
-				prompt_tokens: usageMetadata.promptTokenCount,
-				total_tokens: usageMetadata.totalTokenCount,
+		try {
+			const reasonsMap: Record<string, string> = {
+				STOP: 'stop',
+				MAX_TOKENS: 'length',
+				SAFETY: 'content_filter',
+				RECITATION: 'content_filter',
 			};
-		}
 
-		if (candidates) {
-			for (const cand of candidates) {
-				const { index, content, finishReason } = cand;
-				const { parts } = content;
-				const text = parts.map((p: any) => p.text).join('');
-
-				if (this.last[index] === undefined) {
-					this.last[index] = '';
-				}
-
-				const lastText = this.last[index] || '';
-				let delta = '';
-
-				if (text.startsWith(lastText)) {
-					delta = text.substring(lastText.length);
-				} else {
-					// Find the common prefix
-					let i = 0;
-					while (i < text.length && i < lastText.length && text[i] === lastText[i]) {
-						i++;
-					}
-					// Send the rest of the new text as delta.
-					// This might not be perfect for all clients, but it prevents data loss.
-					delta = text.substring(i);
-				}
-
-				this.last[index] = text;
-
-				const obj = {
-					id: this.id,
-					object: 'chat.completion.chunk',
-					created: Math.floor(Date.now() / 1000),
-					model: this.model,
-					choices: [
-						{
-							index,
-							delta: { content: delta },
-							finish_reason: reasonsMap[finishReason] || finishReason,
-						},
-					],
+			const { candidates, usageMetadata } = line;
+			if (usageMetadata) {
+				this.shared.usage = {
+					completion_tokens: usageMetadata.candidatesTokenCount,
+					prompt_tokens: usageMetadata.promptTokenCount,
+					total_tokens: usageMetadata.totalTokenCount,
 				};
-				controller.enqueue(`data: ${JSON.stringify(obj)}\n\n`);
 			}
+
+			if (candidates) {
+				for (const cand of candidates) {
+					if (!cand || !cand.content || !cand.content.parts) {
+						console.warn(`[LOG] DO: Stream Transform skipped a candidate with missing content/parts: ${JSON.stringify(cand)}`);
+						continue;
+					}
+
+					const { index, content, finishReason } = cand;
+					const { parts } = content;
+					const text = parts.map((p: any) => p.text).join('');
+
+					if (this.last[index] === undefined) {
+						this.last[index] = '';
+					}
+
+					const lastText = this.last[index] || '';
+					let delta = '';
+
+					if (text.startsWith(lastText)) {
+						delta = text.substring(lastText.length);
+					} else {
+						console.warn(`[LOG] DO: Stream delta calculation mismatch. lastText: "${lastText}", newText: "${text}"`);
+						let i = 0;
+						while (i < text.length && i < lastText.length && text[i] === lastText[i]) {
+							i++;
+						}
+						delta = text.substring(i);
+					}
+
+					this.last[index] = text;
+
+					const obj = {
+						id: this.id,
+						object: 'chat.completion.chunk',
+						created: Math.floor(Date.now() / 1000),
+						model: this.model,
+						choices: [
+							{
+								index,
+								delta: { content: delta },
+								finish_reason: reasonsMap[finishReason] || finishReason,
+							},
+						],
+					};
+					controller.enqueue(`data: ${JSON.stringify(obj)}\n\n`);
+				}
+			}
+		} catch (e: any) {
+			console.error("[LOG] DO: CRITICAL ERROR inside toOpenAiStream transform! This caused the stream to crash.", e);
+			const errorObj = {
+				error: {
+					message: `Stream transformation failed: ${e.message}`,
+					type: 'stream_transform_error',
+				}
+			};
+			controller.enqueue(`data: ${JSON.stringify(errorObj)}\n\n`);
+			controller.terminate();
 		}
 	}
 
