@@ -2,7 +2,7 @@
  * @Author: xieguodong xieguodong@gmail.com
  * @Date: 2025-08-19 13:53:02
  * @LastEditors: xieguodong xieguodong@gmail.com
- * @LastEditTime: 2025-08-20 08:34:11
+ * @LastEditTime: 2025-08-20 14:29:18
  * @FilePath: \gemini-balance-do\src\index.ts
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
  */
@@ -57,7 +57,7 @@ app.all('*', async (c) => {
 
     } catch (e: any) {
         // 这个catch块捕获的是与Durable Object通信时发生的罕见错误
-        console.error("Fatal Error: Failed to fetch from Durable Object stub.", e);
+        console.error("--- [FATAL] Unhandled Exception in Main Worker ---", "Error:", e, "Stack:", e.stack);
         
         // 向客户端返回一个结构化的JSON错误
         const errorResponse = {
