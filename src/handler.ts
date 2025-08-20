@@ -1,4 +1,4 @@
-// gemini-balance-do/src/handler.ts (The Definitive, Final, Fully-Functional Version)
+// gemini-balance-do/src/handler.ts (The Definitive, Final, Fully-Functional Version with Rollback)
 
 import { DurableObject } from 'cloudflare:workers';
 import { isAdminAuthenticated } from './auth';
@@ -39,7 +39,6 @@ export class LoadBalancer extends DurableObject {
 
 	async fetch(request: Request): Promise<Response> {
 		// --- 全局错误安全网 ---
-		// 这是第一道防线，捕获所有未处理的异常，防止DO实例崩溃
 		try {
 			const url = new URL(request.url);
 			const pathname = url.pathname;
@@ -72,7 +71,6 @@ export class LoadBalancer extends DurableObject {
 				return this.handleOpenAI(request);
 			}
 			
-			// 对于所有其他未知路径，返回404
 			return new Response("Route not found.", { status: 404, headers: fixCors({}).headers });
 
 		} catch (e: any) {
@@ -125,7 +123,6 @@ export class LoadBalancer extends DurableObject {
 		} else {
 			const errorText = await response.text();
 			console.error(`[ERROR] Gemini API returned an error. Status: ${response.status}, Body: ${errorText}`);
-			// 将上游错误也以JSON格式返回给客户端
 			return new Response(JSON.stringify({ error: { message: `Upstream Gemini API Error: ${errorText}`, type: 'gemini_api_error' } }), {
 				status: response.status,
 				headers: { 'Content-Type': 'application/json', ...fixCors({}).headers },
@@ -183,7 +180,7 @@ export class LoadBalancer extends DurableObject {
 	}
 
     // --- 以下是其他辅助函数和管理API函数 ---
-    // --- 已全部恢复到原始、功能正常的版本，并增加了日志 ---
+    // --- 已全部恢复到您原始的、功能正常的版本，并增加了日志 ---
     
 	async handleModels(apiKey: string) {
 		const response = await fetch(`${BASE_URL}/${API_VERSION}/models`, {
@@ -325,13 +322,13 @@ export class LoadBalancer extends DurableObject {
 	async handleApiKeysCheck(): Promise<Response> {
 		try {
 			console.log("[LOG] Admin: Starting API keys check.");
-			// 使用原始的、功能正常的 .raw() 方法
-			const results = await this.ctx.storage.sql.exec('SELECT api_key FROM api_keys').raw<[string]>();
-			const keys = results ? results.map(row => row[0]) : [];
+			const results = await this.ctx.storage.sql.exec('SELECT api_key FROM api_keys').raw<any[]>();
+			const keys = Array.from(results);
 			
 			console.log(`[LOG] Admin: Found ${keys.length} keys to check.`);
 			const checkResults = await Promise.all(
-				keys.map(async (key: string) => {
+				keys.map(async (keyArr) => {
+                    const key = keyArr[0] as string;
 					try {
 						const response = await fetch(`${BASE_URL}/${API_VERSION}/models?key=${key}`);
 						return { key, valid: response.ok, error: response.ok ? null : await response.text() };
@@ -360,8 +357,8 @@ export class LoadBalancer extends DurableObject {
 		try {
 			console.log("[LOG] Admin: Fetching all API keys.");
 			// 使用原始的、功能正常的 .raw() 方法
-			const results = await this.ctx.storage.sql.exec('SELECT api_key FROM api_keys').raw<[string]>();
-			const keys = results ? results.map(row => row[0]) : [];
+			const results = await this.ctx.storage.sql.exec('SELECT * FROM api_keys').raw<any[]>();
+			const keys = Array.from(results).map(row => row[0] as string);
 			console.log(`[LOG] Admin: Found ${keys.length} keys.`);
 			return new Response(JSON.stringify({ keys }), { headers: { 'Content-Type': 'application/json' } });
 		} catch (error: any) {
@@ -374,7 +371,7 @@ export class LoadBalancer extends DurableObject {
 		try {
 			console.log("[LOG] Executing SQL to get a random key...");
 			// 使用原始的、功能正常的 .raw() 方法
-			const results = await this.ctx.storage.sql.exec('SELECT api_key FROM api_keys ORDER BY RANDOM() LIMIT 1').raw<[string]>();
+			const results = await this.ctx.storage.sql.exec('SELECT * FROM api_keys ORDER BY RANDOM() LIMIT 1').raw<any[]>();
 			console.log("[LOG] SQL query completed.");
 
 			if (results && results.length > 0 && results[0] && typeof results[0][0] === 'string') {
