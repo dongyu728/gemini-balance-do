@@ -327,7 +327,6 @@ export class LoadBalancer extends DurableObject {
 	async handleApiKeysCheck(): Promise<Response> {
 		try {
 			console.log("[LOG] Admin: Starting API keys check.");
-			// 【代码回退】使用原始的、功能正常的 .raw() 方法
 			const results = await this.ctx.storage.sql.exec('SELECT api_key FROM api_keys').raw<any[]>();
 			const keys = Array.from(results).map(row => row[0] as string);
 			
