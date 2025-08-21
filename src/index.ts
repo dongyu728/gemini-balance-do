@@ -2,7 +2,7 @@
  * @Author: xieguodong xieguodong@gmail.com
  * @Date: 2025-08-19 13:53:02
  * @LastEditors: xieguodong xieguodong@gmail.com
- * @LastEditTime: 2025-08-20 09:07:08
+ * @LastEditTime: 2025-08-20 18:59:21
  * @FilePath: \gemini-balance-do\src\index.ts
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
  */
@@ -41,7 +41,91 @@ app.get('/favicon.ico', async (c) => {
     return c.text('Not found', 404);
 });
 
+// 异步处理端点
+app.post('/async/process', async (c) => {
+    try {
+        const id: DurableObjectId = c.env.LOAD_BALANCER.idFromName('loadbalancer');
+        const stub = c.env.LOAD_BALANCER.get(id, { locationHint: 'wnam' });
+        
+        const request = c.req.raw.clone();
+        const requestId = generateRequestId();
+        
+        // 立即返回202接受响应
+        const response = new Response(JSON.stringify({
+            request_id: requestId,
+            status: 'processing',
+            message: 'Request is being processed asynchronously',
+            check_url: `/async/result/${requestId}`
+        }), {
+            status: 202,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            }
+        });
+        
+        // 后台处理（不阻塞响应）
+        c.executionCtx.waitUntil((async () => {
+            try {
+                await stub.fetch(new Request(request.url, {
+                    method: 'POST',
+                    headers: {
+                        ...Object.fromEntries(request.headers),
+                        'x-async-request': 'true',
+                        'x-request-id': requestId
+                    },
+                    body: await request.text()
+                }));
+            } catch (error) {
+                console.error(`Background processing failed for ${requestId}:`, error);
+            }
+        })());
+        
+        return response;
+    } catch (e: any) {
+        console.error("Async processing error:", e);
+        return c.json({
+            error: "Failed to initiate async processing",
+            details: e.message
+        }, 500);
+    }
+});
 
+// 结果查询端点
+app.get('/async/result/:requestId', async (c) => {
+    const requestId = c.req.param('requestId');
+    try {
+        const id: DurableObjectId = c.env.LOAD_BALANCER.idFromName('loadbalancer');
+        const stub = c.env.LOAD_BALANCER.get(id, { locationHint: 'wnam' });
+        
+        const resultResponse = await stub.fetch(new Request(
+            `https://internal/result/${requestId}`,
+            { method: 'GET' }
+        ));
+        
+        if (resultResponse.status === 404) {
+            return c.json({
+                request_id: requestId,
+                status: 'processing',
+                message: 'Result not ready yet'
+            }, 202);
+        }
+        
+        return new Response(resultResponse.body, {
+            status: resultResponse.status,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            }
+        });
+    } catch (e: any) {
+        console.error(`Result query error for ${requestId}:`, e);
+        return c.json({
+            error: "Failed to query result",
+            details: e.message
+        }, 500);
+    }
+});
 
 // 其它请求转发到 Durable Object
 app.all('*', async (c) => {
@@ -72,10 +156,15 @@ app.all('*', async (c) => {
     }
 });
 
+function generateRequestId(): string {
+    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
+
 type Env = {
     LOAD_BALANCER: DurableObjectNamespace<LoadBalancer>;
     AUTH_KEY: string;
     HOME_ACCESS_KEY: string;
+    RESULTS_KV: KVNamespace;
 };
 
 export default {
